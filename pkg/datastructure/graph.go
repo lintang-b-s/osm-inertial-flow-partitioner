@@ -297,6 +297,16 @@ func (g *Graph) ForOutEdgesOf(u Index, entryPoint Index, handle func(e *OutEdge,
 	}
 }
 
+func (g *Graph) ForOutEdgesOfVertex(u Index, handle func(e *OutEdge, exitPoint Index)) {
+	for e := g.vertices[u].firstOut; e < g.vertices[u+1].firstOut; e++ {
+		if g.outEdges[e].GetHead() == u {
+			continue
+		}
+
+		handle(g.outEdges[e], g.GetExitOrder(u, e))
+	}
+}
+
 func (g *Graph) ForInEdgesOf(v Index, exitPoint Index, handle func(e *InEdge, entryPoint Index, turnType pkg.TurnType)) {
 	for e := g.vertices[v].firstIn; e < g.vertices[v+1].firstIn; e++ {
 		if g.inEdges[e].GetTail() == v {
@@ -408,6 +418,12 @@ func (g *Graph) GetVertices() []*Vertex {
 
 func (g *Graph) GetVertex(u Index) *Vertex {
 	return g.vertices[u]
+}
+
+func (g *Graph) ForEachVertices(handle func(v *Vertex, vId Index)) {
+	for id, v := range g.vertices[:g.NumberOfVertices()] {
+		handle(v, Index(id))
+	}
 }
 
 func (g *Graph) GetVertexFirstOut(u Index) Index {

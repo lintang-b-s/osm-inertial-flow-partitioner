@@ -15,5 +15,6 @@ const (
 const (
 	INF_WEIGHT              = 1e9
 	MAX_FLOW                = 2e9
-	INERTIAL_FLOW_ITERATION = 8
+	INERTIAL_FLOW_ITERATION = 3
+	SOURCE_SINK_RATE        = 0.25
 )
