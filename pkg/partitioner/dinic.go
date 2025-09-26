@@ -6,36 +6,39 @@ import (
 	"math"
 
 	"github.com/lintang-b-s/osm-inertial-flow-partitioner/pkg/datastructure"
+	"github.com/lintang-b-s/osm-inertial-flow-partitioner/pkg/util"
 )
 
 type DinicMaxFlow struct {
+	graph *datastructure.PartitionGraph
+	debug bool
 }
 
-func NewDinicMaxFlow() *DinicMaxFlow {
-	return &DinicMaxFlow{}
+func NewDinicMaxFlow(graph *datastructure.PartitionGraph, debug bool) *DinicMaxFlow {
+	return &DinicMaxFlow{graph: graph, debug: debug}
 }
 
-func (dmf *DinicMaxFlow) bfsComputeLevelGraph(graph *datastructure.PartitionGraph,
+func (dmf *DinicMaxFlow) bfsComputeLevelGraph(
 	borderSourceNodes, sourceNodes, sinkNodes []datastructure.Index) {
 	sourceNodeSet := makeNodeSet(sourceNodes)
 	sinkNodeSet := makeNodeSet(sinkNodes)
 
-	graph.ForEachVertices(func(v datastructure.PartitionVertex) {
-		graph.SetVertexLevel(v.GetID(), INVALID_LEVEL)
+	dmf.graph.ForEachVertices(func(v datastructure.PartitionVertex) {
+		dmf.graph.SetVertexLevel(v.GetID(), INVALID_LEVEL)
 	})
 
 	levelQueue := list.New()
 
 	for _, nodeId := range borderSourceNodes {
-		graph.SetVertexLevel(nodeId, 0)
+		dmf.graph.SetVertexLevel(nodeId, 0)
 		levelQueue.PushBack(nodeId)
-		graph.ForEachVertexEdges(nodeId, func(edge *datastructure.MaxFlowEdge) {
+		dmf.graph.ForEachVertexEdges(nodeId, func(edge *datastructure.MaxFlowEdge) {
 
 			target := edge.GetTo()
 
 			// if target is in source set, set level to 0
 			if nodeInSet(target, sourceNodeSet) {
-				graph.SetVertexLevel(target, 0)
+				dmf.graph.SetVertexLevel(target, 0)
 			}
 		})
 	}
@@ -49,15 +52,15 @@ func (dmf *DinicMaxFlow) bfsComputeLevelGraph(graph *datastructure.PartitionGrap
 			continue
 		}
 
-		uLevel := graph.GetVertexLevel(u)
+		uLevel := dmf.graph.GetVertexLevel(u)
 		level := uLevel + 1
 
-		graph.ForEachVertexEdges(u, func(edge *datastructure.MaxFlowEdge) {
+		dmf.graph.ForEachVertexEdges(u, func(edge *datastructure.MaxFlowEdge) {
 			target := edge.GetTo()
 
 			residual := edge.GetCapacity() - edge.GetFlow()
-			if residual > 0 && graph.GetVertexLevel(target) > level {
-				graph.SetVertexLevel(target, level)
+			if residual > 0 && dmf.graph.GetVertexLevel(target) > level {
+				dmf.graph.SetVertexLevel(target, level)
 				levelQueue.PushBack(target)
 			}
 		})
@@ -67,49 +70,49 @@ func (dmf *DinicMaxFlow) bfsComputeLevelGraph(graph *datastructure.PartitionGrap
 }
 
 // dfsGetAugmentingPath. perform dfs from nodeId to find augmenting path
-func (dmf *DinicMaxFlow) dfsAugmentingPath(graph *datastructure.PartitionGraph, nodeId datastructure.Index,
-	sinkNodeSet map[datastructure.Index]struct{}, maxFlow float64) float64 {
+func (dmf *DinicMaxFlow) dfsAugmentingPath(nodeId datastructure.Index,
+	sinkNodeSet map[datastructure.Index]struct{}, maxFlow int) int {
 	// termination
 
 	if _, exists := sinkNodeSet[nodeId]; exists || maxFlow == 0 {
 		return maxFlow
 	}
 
-	for ; graph.GetLastEdgeIndex(nodeId) < graph.GetVertexEdgesSize(nodeId); graph.IncrementLastEdgeIndex(nodeId) {
-		j := graph.GetLastEdgeIndex(nodeId)
-		edge := graph.GetEdgeOfVertex(nodeId, j)
+	for ; dmf.graph.GetLastEdgeIndex(nodeId) < dmf.graph.GetVertexEdgesSize(nodeId); dmf.graph.IncrementLastEdgeIndex(nodeId) {
+		j := dmf.graph.GetLastEdgeIndex(nodeId)
+		edge := dmf.graph.GetEdgeOfVertex(nodeId, j)
 		v := edge.GetTo()
 		residual := edge.GetCapacity() - edge.GetFlow()
-		if graph.GetVertexLevel(v) != graph.GetVertexLevel(nodeId)+1 {
+		if dmf.graph.GetVertexLevel(v) != dmf.graph.GetVertexLevel(nodeId)+1 {
 			continue
 		}
 
-		if flow := dmf.dfsAugmentingPath(graph, v, sinkNodeSet, math.Min(residual, maxFlow)); flow > 0 {
+		if flow := dmf.dfsAugmentingPath(v, sinkNodeSet, util.MinInt(residual, maxFlow)); flow > 0 {
 			edge.AddFlow(flow)
-			revEdge := graph.GetReversedEdgeOfVertex(nodeId, j)
+			revEdge := dmf.graph.GetReversedEdgeOfVertex(nodeId, j)
 			revEdge.AddFlow(-flow)
 			return flow
 		}
 	}
-	graph.SetVertexLevel(nodeId, INVALID_LEVEL)
+	dmf.graph.SetVertexLevel(nodeId, INVALID_LEVEL)
 
 	return 0.0
 }
 
-func (dmf *DinicMaxFlow) blockingFlow(graph *datastructure.PartitionGraph,
+func (dmf *DinicMaxFlow) blockingFlow(
 	sinkNodes, borderSourceNodes []datastructure.Index) int {
 	// [On Balanced Separators in Road Networks, Schild, et al.] maximum flow using Dinic’s algorithm (augmenting paths, in the unit-capacity case computed by breadth-first search)
 	// number of augmenting paths in the end will equal the the number of cut edges
 	flowIncrease := 0
-	dmf.resetCurrentEdges(graph)
+	dmf.resetCurrentEdges()
 	sinkNodesSet := makeNodeSet(sinkNodes)
 	for _, borderSourceNodeId := range borderSourceNodes {
-		if graph.GetVertexLevel(borderSourceNodeId) == INVALID_LEVEL {
+		if dmf.graph.GetVertexLevel(borderSourceNodeId) == INVALID_LEVEL {
 			continue
 		}
 
 		for {
-			flow := dmf.dfsAugmentingPath(graph, borderSourceNodeId, sinkNodesSet, math.MaxFloat64)
+			flow := dmf.dfsAugmentingPath(borderSourceNodeId, sinkNodesSet, math.MaxInt)
 			if flow == 0 {
 				break
 			}
@@ -120,42 +123,42 @@ func (dmf *DinicMaxFlow) blockingFlow(graph *datastructure.PartitionGraph,
 	return flowIncrease
 }
 
-func (dmf *DinicMaxFlow) resetCurrentEdges(graph *datastructure.PartitionGraph) {
-	for i := 0; i < graph.NumberOfVertices(); i++ {
-		graph.SetLastEdgeIndex(datastructure.Index(i), 0)
+func (dmf *DinicMaxFlow) resetCurrentEdges() {
+	for i := 0; i < dmf.graph.NumberOfVertices(); i++ {
+		dmf.graph.SetLastEdgeIndex(datastructure.Index(i), 0)
 	}
 }
 
-func (dmf *DinicMaxFlow) resetGraph(graph *datastructure.PartitionGraph) {
-	graph.ResetGraph()
+func (dmf *DinicMaxFlow) resetGraph() {
+	dmf.graph.ResetGraph()
 }
 
-func (dmf *DinicMaxFlow) ComputeMinCut(graph *datastructure.PartitionGraph,
+func (dmf *DinicMaxFlow) ComputeMinCut(
 	sourceNodes, sinkNodes []datastructure.Index) *MinCut {
-	dmf.resetGraph(graph)
-	minCut := NewMinCut(graph.NumberOfVertices())
 
-	borderSourceNodes := buildBorderNodes(sourceNodes, graph)
+	minCut := NewMinCut(dmf.graph.NumberOfVertices())
 
-	borderSinkNodes := buildBorderNodes(sinkNodes, graph)
+	borderSourceNodes := dmf.buildBorderNodes(sourceNodes)
+
+	borderSinkNodes := dmf.buildBorderNodes(sinkNodes)
 
 	sourceSet := makeNodeSet(sourceNodes)
 	sinkSet := makeNodeSet(sinkNodes)
 
 	numberOfMinCutEdges := 0
 	for {
-		dmf.bfsComputeLevelGraph(graph, borderSourceNodes, sourceNodes, sinkNodes)
+		dmf.bfsComputeLevelGraph(borderSourceNodes, sourceNodes, sinkNodes)
 
-		if !dmf.isSeparated(borderSinkNodes, graph) {
-			numberOfMinCutEdges += dmf.blockingFlow(graph, sinkNodes, borderSourceNodes)
+		if !dmf.isSeparated(borderSinkNodes) {
+			numberOfMinCutEdges += dmf.blockingFlow(sinkNodes, borderSourceNodes)
 		} else {
 			for _, s := range sourceNodes {
-				graph.SetVertexLevel(s, 0)
+				dmf.graph.SetVertexLevel(s, 0)
 			}
 
-			dmf.makeMinCutFlags(graph, minCut, numberOfMinCutEdges)
+			dmf.makeMinCutFlags(minCut, numberOfMinCutEdges)
 
-			if !dmf.validateResult(graph, minCut, sourceSet, sinkSet) {
+			if dmf.debug && !dmf.validateResult(minCut, sourceSet, sinkSet) {
 				fmt.Printf("incorrect max flow result!!!, number of min-cut not the same as max flow, also flow conservation violated\n")
 			}
 			return minCut
@@ -163,36 +166,15 @@ func (dmf *DinicMaxFlow) ComputeMinCut(graph *datastructure.PartitionGraph,
 	}
 }
 
-func (dmf *DinicMaxFlow) makeMinCutFlags(graph *datastructure.PartitionGraph, minCut *MinCut, numberOfMinCutEdges int) {
-	for u := datastructure.Index(0); u < datastructure.Index(graph.NumberOfVertices()); u++ {
-		if graph.GetVertexLevel(u) != INVALID_LEVEL {
-			minCut.SetFlag(u, true)
-		} else {
-			minCut.incrementNumNodesInPartitionTwo()
-		}
-	}
-	minCut.setNumberofMinCutEdges(numberOfMinCutEdges)
-}
-
-func (dmf *DinicMaxFlow) isSeparated(borderSinkNodes []datastructure.Index, graph *datastructure.PartitionGraph) bool {
-	for _, borderSinkNodeId := range borderSinkNodes {
-		if graph.GetVertexLevel(borderSinkNodeId) != INVALID_LEVEL {
-			return false
-		}
-	}
-
-	return true
-}
-
-func (dmf *DinicMaxFlow) validateResult(graph *datastructure.PartitionGraph, minCut *MinCut,
-	sourceSet, sinkSet map[datastructure.Index]struct{}) bool {
+func (dmf *DinicMaxFlow) validateResultOne(minCut *MinCut,
+	source, target datastructure.Index) bool {
 	// for every vertex that not in source and sink, check if incoming flow equal to outgoing flow
-	incomingFlow := make([]float64, graph.NumberOfVertices())
-	outgoingFlow := make([]float64, graph.NumberOfVertices())
+	incomingFlow := make([]int, dmf.graph.NumberOfVertices())
+	outgoingFlow := make([]int, dmf.graph.NumberOfVertices())
 	cutEdgesCount := 0
-	for u := datastructure.Index(0); u < datastructure.Index(graph.NumberOfVertices()); u++ {
-		for i := 0; i < graph.GetVertexEdgesSize(u); i++ {
-			edge := graph.GetEdgeOfVertex(u, i)
+	for u := datastructure.Index(0); u < datastructure.Index(dmf.graph.NumberOfVertices()); u++ {
+		for i := 0; i < dmf.graph.GetVertexEdgesSize(u); i++ {
+			edge := dmf.graph.GetEdgeOfVertex(u, i)
 			v := edge.GetTo()
 			flow := edge.GetFlow()
 
@@ -210,7 +192,68 @@ func (dmf *DinicMaxFlow) validateResult(graph *datastructure.PartitionGraph, min
 			}
 		}
 	}
-	for u := datastructure.Index(0); u < datastructure.Index(graph.NumberOfVertices()); u++ {
+	for u := datastructure.Index(0); u < datastructure.Index(dmf.graph.NumberOfVertices()); u++ {
+
+		if source != u && u != target && incomingFlow[u] != outgoingFlow[u] {
+			return false
+		}
+	}
+
+	if minCut.GetNumberOfMinCutEdges() != cutEdgesCount {
+		return false
+	}
+
+	return true
+}
+
+func (dmf *DinicMaxFlow) makeMinCutFlags(minCut *MinCut, numberOfMinCutEdges int) {
+	for u := datastructure.Index(0); u < datastructure.Index(dmf.graph.NumberOfVertices()); u++ {
+		if dmf.graph.GetVertexLevel(u) != INVALID_LEVEL {
+			minCut.SetFlag(u, true)
+		} else {
+			minCut.incrementNumNodesInPartitionTwo()
+		}
+	}
+	minCut.setNumberofMinCutEdges(numberOfMinCutEdges)
+}
+
+func (dmf *DinicMaxFlow) isSeparated(borderSinkNodes []datastructure.Index) bool {
+	for _, borderSinkNodeId := range borderSinkNodes {
+		if dmf.graph.GetVertexLevel(borderSinkNodeId) != INVALID_LEVEL {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (dmf *DinicMaxFlow) validateResult(minCut *MinCut,
+	sourceSet, sinkSet map[datastructure.Index]struct{}) bool {
+	// for every vertex that not in source and sink, check if incoming flow equal to outgoing flow
+	incomingFlow := make([]int, dmf.graph.NumberOfVertices())
+	outgoingFlow := make([]int, dmf.graph.NumberOfVertices())
+	cutEdgesCount := 0
+	for u := datastructure.Index(0); u < datastructure.Index(dmf.graph.NumberOfVertices()); u++ {
+		for i := 0; i < dmf.graph.GetVertexEdgesSize(u); i++ {
+			edge := dmf.graph.GetEdgeOfVertex(u, i)
+			v := edge.GetTo()
+			flow := edge.GetFlow()
+
+			if flow > 0 {
+				outgoingFlow[u] += flow
+				incomingFlow[v] += flow
+			}
+
+			if flow > edge.GetCapacity() {
+				return false
+			}
+
+			if minCut.GetFlag(u) && !minCut.GetFlag(v) {
+				cutEdgesCount++
+			}
+		}
+	}
+	for u := datastructure.Index(0); u < datastructure.Index(dmf.graph.NumberOfVertices()); u++ {
 		inSourceSet := nodeInSet(u, sourceSet)
 		inSinkSet := nodeInSet(u, sinkSet)
 		if !inSourceSet && !inSinkSet && incomingFlow[u] != outgoingFlow[u] {
@@ -225,7 +268,7 @@ func (dmf *DinicMaxFlow) validateResult(graph *datastructure.PartitionGraph, min
 	return true
 }
 
-func buildBorderNodes(nodeIds []datastructure.Index, graph *datastructure.PartitionGraph) []datastructure.Index {
+func (dmf *DinicMaxFlow) buildBorderNodes(nodeIds []datastructure.Index) []datastructure.Index {
 	borderNodes := make([]datastructure.Index, 0, int(float64(len(nodeIds))*0.1))
 
 	set := make(map[datastructure.Index]struct{}, len(nodeIds))
@@ -233,18 +276,18 @@ func buildBorderNodes(nodeIds []datastructure.Index, graph *datastructure.Partit
 		set[nodeId] = struct{}{}
 	}
 	for _, sourceNodeId := range nodeIds {
-		if hasNeighborNotInSet(sourceNodeId, set, graph) {
+		if dmf.hasNeighborNotInSet(sourceNodeId, set) {
 			borderNodes = append(borderNodes, sourceNodeId)
 		}
 	}
 	return borderNodes
 }
 
-func hasNeighborNotInSet(u datastructure.Index, set map[datastructure.Index]struct{},
-	graph *datastructure.PartitionGraph) bool {
+func (dmf *DinicMaxFlow) hasNeighborNotInSet(u datastructure.Index, set map[datastructure.Index]struct{},
+) bool {
 
-	for i := 0; i < graph.GetVertexEdgesSize(u); i++ {
-		edge := graph.GetEdgeOfVertex(u, i)
+	for i := 0; i < dmf.graph.GetVertexEdgesSize(u); i++ {
+		edge := dmf.graph.GetEdgeOfVertex(u, i)
 		v := edge.GetTo()
 
 		if _, exists := set[v]; !exists {
@@ -267,4 +310,90 @@ func makeNodeSet(nodeIds []datastructure.Index) map[datastructure.Index]struct{}
 	}
 
 	return set
+}
+
+func (dmf *DinicMaxFlow) bfs(
+	source, target datastructure.Index) bool {
+
+	dmf.graph.ForEachVertices(func(v datastructure.PartitionVertex) {
+		dmf.graph.SetVertexLevel(v.GetID(), INVALID_LEVEL)
+	})
+
+	levelQueue := list.New()
+	levelQueue.PushBack(source)
+	dmf.graph.SetVertexLevel(source, 0)
+
+	for levelQueue.Len() > 0 {
+		u := levelQueue.Front().Value.(datastructure.Index)
+		levelQueue.Remove(levelQueue.Front())
+
+		uLevel := dmf.graph.GetVertexLevel(u)
+		level := uLevel + 1
+
+		dmf.graph.ForEachVertexEdges(u, func(edge *datastructure.MaxFlowEdge) {
+			target := edge.GetTo()
+
+			residual := edge.GetCapacity() - edge.GetFlow()
+			if residual > 0 && dmf.graph.GetVertexLevel(target) == INVALID_LEVEL {
+				dmf.graph.SetVertexLevel(target, level)
+				levelQueue.PushBack(target)
+			}
+		})
+
+	}
+	return dmf.graph.GetVertexLevel(target) != INVALID_LEVEL
+}
+
+func (dmf *DinicMaxFlow) dfs(nodeId datastructure.Index, t datastructure.Index, maxFlow int) int {
+	// termination
+
+	if nodeId == t || maxFlow == 0 {
+		return maxFlow
+	}
+
+	for ; dmf.graph.GetLastEdgeIndex(nodeId) < dmf.graph.GetVertexEdgesSize(nodeId); dmf.graph.IncrementLastEdgeIndex(nodeId) {
+		j := dmf.graph.GetLastEdgeIndex(nodeId)
+		edge := dmf.graph.GetEdgeOfVertex(nodeId, j)
+		v := edge.GetTo()
+		residual := edge.GetCapacity() - edge.GetFlow()
+		if dmf.graph.GetVertexLevel(v) != dmf.graph.GetVertexLevel(nodeId)+1 {
+			continue
+		}
+
+		if flow := dmf.dfs(v, t, util.MinInt(residual, maxFlow)); flow > 0 {
+			edge.AddFlow(flow)
+			revEdge := dmf.graph.GetReversedEdgeOfVertex(nodeId, j)
+			revEdge.AddFlow(-flow)
+			return flow
+		}
+	}
+
+	return 0.0
+}
+
+func (dmf *DinicMaxFlow) MaxFlow(s datastructure.Index, t datastructure.Index) *MinCut {
+	var (
+		minCut = NewMinCut(dmf.graph.NumberOfVertices())
+	)
+	maxFlow := 0
+	for {
+		if !dmf.bfs(s, t) {
+
+			dmf.makeMinCutFlags(minCut, maxFlow)
+
+			if !dmf.validateResultOne(minCut, s, t) {
+				fmt.Printf("incorrect max flow result!!!, number of min-cut not the same as max flow, also flow conservation violated\n")
+			}
+			return minCut
+		}
+
+		dmf.resetCurrentEdges()
+		for {
+			flow := dmf.dfs(s, t, math.MaxInt)
+			if flow == 0 {
+				break
+			}
+			maxFlow += flow
+		}
+	}
 }

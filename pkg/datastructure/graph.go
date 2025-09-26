@@ -396,6 +396,14 @@ func (g *Graph) GetOutEdgeCellOffset(v Index) Index {
 	return g.outEdgeCellOffset[g.vertices[v].pvPtr]
 }
 
+func (g *Graph) GetVerticeIds() []Index {
+	nodeIds := make([]Index, 0, g.NumberOfVertices())
+	for i := 0; i < g.NumberOfVertices(); i++ {
+		nodeIds = append(nodeIds, Index(i))
+	}
+	return nodeIds
+}
+
 func (g *Graph) GetInEdgeCellOffset(v Index) Index {
 	return g.inEdgeCellOffset[g.vertices[v].pvPtr]
 }

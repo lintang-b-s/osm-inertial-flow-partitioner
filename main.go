@@ -17,9 +17,10 @@ func main() {
 
 	graph := osmParser.Parse("./data/solo_jogja.osm.pbf", logger)
 
-	partitioner := partitioner.NewRecursiveBisection(graph, int(math.Pow(2, 17)), logger)
-	partitioner.Partition()
-
-	finalPartition := partitioner.GetFinalPartition()
-	_ = finalPartition
+	mlp := partitioner.NewMultilevelPartitioner(
+		[]int{int(math.Pow(2, 10)), int(math.Pow(2, 11)), int(math.Pow(2, 14)), int(math.Pow(2, 17)), int(math.Pow(2, 20))},
+		5,
+		graph, logger,
+	)
+	mlp.RunMultilevelPartitioning("solo_jogja")
 }

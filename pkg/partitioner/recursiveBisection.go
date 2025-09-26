@@ -2,8 +2,7 @@ package partitioner
 
 import (
 	"container/list"
-	"fmt"
-	"log"
+	"sync"
 
 	"github.com/lintang-b-s/osm-inertial-flow-partitioner/pkg"
 	"github.com/lintang-b-s/osm-inertial-flow-partitioner/pkg/datastructure"
@@ -16,21 +15,27 @@ type RecursiveBisection struct {
 	finalPartition  []int // map from vertex id to partition id
 	partitionCount  int
 	logger          *zap.Logger
+	mu              sync.Mutex
 }
 
-func NewRecursiveBisection(graph *datastructure.Graph, maximumCellSize int, logger *zap.Logger) *RecursiveBisection {
+func NewRecursiveBisection(graph *datastructure.Graph, maximumCellSize int, logger *zap.Logger,
+) *RecursiveBisection {
+	finalPartitions := make([]int, graph.NumberOfVertices())
+	for i := range finalPartitions {
+		finalPartitions[i] = pkg.INVALID_PARTITION_ID
+	}
 	return &RecursiveBisection{
 		originalGraph:   graph,
 		maximumCellSize: maximumCellSize,
-		finalPartition:  make([]int, graph.NumberOfVertices()),
+		finalPartition:  finalPartitions,
 		partitionCount:  0,
 		logger:          logger,
 	}
 }
 
 // [On Balanced Separators in Road Networks, Schild, et al.] https://aschild.github.io/papers/roadseparator.pdf
-func (rb *RecursiveBisection) Partition() {
-	pg := rb.buildInitialPartitionGraph()
+func (rb *RecursiveBisection) Partition(initialNodeIds []datastructure.Index) {
+	pg := rb.buildInitialPartitionGraph(initialNodeIds)
 	queue := list.New()
 	queue.PushBack(pg)
 
@@ -38,15 +43,12 @@ func (rb *RecursiveBisection) Partition() {
 
 		curPartitionGraph := queue.Remove(queue.Front()).(*datastructure.PartitionGraph)
 
-		cut := NewDinicMaxFlow().computeInertialFlow(curPartitionGraph, pkg.SOURCE_SINK_RATE)
-
+		iflow := NewInertialFlow(curPartitionGraph)
+		cut := iflow.computeInertialFlowDinic(pkg.SOURCE_SINK_RATE)
 		tooSmall := func(partitionSize int) bool {
 			return partitionSize < rb.maximumCellSize
 		}
 
-		if len(cut.flags) == 0 {
-			fmt.Printf("debug")
-		}
 		partOne, partTwo := rb.applyBisection(cut, curPartitionGraph)
 
 		if !tooSmall(partOne.NumberOfVertices()) {
@@ -75,7 +77,15 @@ func (rb *RecursiveBisection) applyBisection(cut *MinCut, graph *datastructure.P
 
 	partOneMap := make(map[datastructure.Index]datastructure.Index)
 	partTwoMap := make(map[datastructure.Index]datastructure.Index)
+	origGraphVertIdMap := make(map[datastructure.Index]datastructure.Index) // map from original graph vertex id to partition graph vertex id
 	graph.ForEachVertices(func(v datastructure.PartitionVertex) {
+		if v.GetOriginalVertexID() == datastructure.Index(pkg.ARTIFICIAL_SOURCE_ID) ||
+			v.GetOriginalVertexID() == datastructure.Index(pkg.ARTIFICIAL_SINK_ID) {
+			// skip artificial source and sink
+			return
+		}
+		origGraphVertIdMap[v.GetOriginalVertexID()] = v.GetID()
+
 		lat, lon := v.GetVertexCoordinate()
 		if cut.GetFlag(v.GetID()) {
 			newVertex := datastructure.NewPartitionVertex(partOneId, v.GetOriginalVertexID(),
@@ -92,12 +102,13 @@ func (rb *RecursiveBisection) applyBisection(cut *MinCut, graph *datastructure.P
 		}
 	})
 
-	graph.ForEachVertices(func(v datastructure.PartitionVertex) {
-		graph.ForEachVertexEdges(v.GetID(), func(e *datastructure.MaxFlowEdge) {
-			u := e.GetFrom()
-			v := e.GetTo()
-
-			// exclude cut edges (edges that connect partition one and two)
+	for _, uVertex := range graph.GetVertices() {
+		rb.originalGraph.ForOutEdgesOfVertex(uVertex.GetOriginalVertexID(), func(e *datastructure.OutEdge, exitPoint datastructure.Index) {
+			v, ok := origGraphVertIdMap[e.GetHead()]
+			if !ok {
+				return
+			}
+			u := uVertex.GetID()
 			if cut.GetFlag(u) && cut.GetFlag(v) {
 				uPartOne := partOneMap[u]
 				vPartOne := partOneMap[v]
@@ -108,13 +119,14 @@ func (rb *RecursiveBisection) applyBisection(cut *MinCut, graph *datastructure.P
 				partitionTwo.AddEdge(uPartTwo, vPartTwo)
 			}
 		})
-	})
+	}
 
 	return partitionOne, partitionTwo
 }
 
 func (rb *RecursiveBisection) assignFinalPartition(graph *datastructure.PartitionGraph) {
-	log.Printf("Created partition %d with %d vertices", rb.partitionCount, graph.NumberOfVertices())
+	rb.mu.Lock()
+	defer rb.mu.Unlock()
 	for i := 0; i < graph.NumberOfVertices(); i++ {
 		v := graph.GetVertex(datastructure.Index(i))
 		originalId := v.GetOriginalVertexID()
@@ -123,18 +135,32 @@ func (rb *RecursiveBisection) assignFinalPartition(graph *datastructure.Partitio
 	rb.partitionCount++
 }
 
-func (rb *RecursiveBisection) buildInitialPartitionGraph() *datastructure.PartitionGraph {
-	pg := datastructure.NewPartitionGraph(rb.originalGraph.NumberOfVertices())
-	rb.originalGraph.ForEachVertices(func(v *datastructure.Vertex, vId datastructure.Index) {
+func (rb *RecursiveBisection) buildInitialPartitionGraph(initialVerticeIds []datastructure.Index) *datastructure.PartitionGraph {
+	pg := datastructure.NewPartitionGraph(len(initialVerticeIds))
+	// initialVerticeIds = stil original vertex id
+
+	initialVerticeIdSet := makeNodeSet(initialVerticeIds)
+
+	newVid := datastructure.Index(0)
+	newMapVid := make(map[datastructure.Index]datastructure.Index)
+	for _, vId := range initialVerticeIds {
 		lat, lon := rb.originalGraph.GetVertexCoordinates(vId)
-		vertex := datastructure.NewPartitionVertex(vId, vId, lat, lon)
-
+		vertex := datastructure.NewPartitionVertex(newVid, vId, lat, lon)
+		newMapVid[vId] = newVid
 		pg.AddVertex(vertex)
+		newVid++
+	}
 
+	for _, vId := range initialVerticeIds {
 		rb.originalGraph.ForOutEdgesOfVertex(vId, func(e *datastructure.OutEdge, exitPoint datastructure.Index) {
-			pg.AddEdge(vId, e.GetHead())
+			if _, adjVertexInSet := initialVerticeIdSet[exitPoint]; !adjVertexInSet {
+				// skip arc that have endpoint outside current cell
+				return
+			}
+			pg.AddEdge(newMapVid[vId], newMapVid[e.GetHead()])
 		})
-	})
+	}
+
 	return pg
 }
 
