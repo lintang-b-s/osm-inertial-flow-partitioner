@@ -26,6 +26,24 @@ func (ek *EdmondsKarp) createArtificialSourceSink(sourceNodes, sinkNodes []datas
 	return artificialSource, artificialSink
 }
 
+// [see clrs section 26.1]   We add a supersource s and add a directed edge (s,si) with c(s,si)=inf for each i=1,2,3,..,m We also create a new supersink t and add a directed edge (ti,t) with capacity c(ti,t) = inf for each i=1,2,...,n
+func (dn *DinicMaxFlow) createArtificialSourceSink(sourceNodes, sinkNodes []datastructure.Index) (datastructure.Index, datastructure.Index) {
+	artificialSource := datastructure.Index(dn.graph.NumberOfVertices())
+	artificialSink := datastructure.Index(dn.graph.NumberOfVertices() + 1)
+
+	dn.graph.AddVertex(datastructure.NewPartitionVertex(artificialSource, datastructure.Index(pkg.ARTIFICIAL_SOURCE_ID), 0.0, 0.0))
+	dn.graph.AddVertex(datastructure.NewPartitionVertex(artificialSink, datastructure.Index(pkg.ARTIFICIAL_SINK_ID), 0.0, 0.0))
+
+	for _, s := range sourceNodes {
+		dn.graph.AddInfEdge(artificialSource, s)
+	}
+
+	for _, t := range sinkNodes {
+		dn.graph.AddInfEdge(t, artificialSink)
+	}
+	return artificialSource, artificialSink
+}
+
 func (ek *EdmondsKarp) sortVerticesByLineProjection(slope, ratio float64) ([]datastructure.Index, []datastructure.Index) {
 
 	vertices := ek.graph.GetVertices()

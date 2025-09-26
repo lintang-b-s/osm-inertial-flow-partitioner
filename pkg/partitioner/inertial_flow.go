@@ -144,7 +144,8 @@ func (inf *inertialFlow) computeInertialFlowDinic(sourceSinkRate float64) *MinCu
 			sources, sinks = dn.sortVerticesByLineDiagonalProjection(input.getLine(), sourceSinkRate)
 		}
 
-		return dn.ComputeMinCut(sources, sinks)
+		s, t := dn.createArtificialSourceSink(sources, sinks)
+		return dn.computeMinCutSuperSourceSink(s, t, sources, sinks)
 	}
 
 	wpInertialFlow.Close()

@@ -120,7 +120,8 @@ func (ek *EdmondsKarp) validateResultOne(minCut *MinCut,
 				return false
 			}
 
-			if minCut.GetFlag(u) && !minCut.GetFlag(v) {
+			if v != sink && v != source &&
+				minCut.GetFlag(u) && !minCut.GetFlag(v) {
 				cutEdgesCount++
 			}
 
