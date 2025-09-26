@@ -19,11 +19,12 @@ func NewEdmondsKarp(graph *datastructure.PartitionGraph, debug bool) *EdmondsKar
 }
 
 func (ek *EdmondsKarp) bfsAugmentingPath(source, sink datastructure.Index) int {
-	prev := make([]*datastructure.MaxFlowEdge, ek.graph.NumberOfVertices())
 	queue := list.New()
 
 	queue.PushBack(source)
-	ek.graph.SetVisited(source, true)
+
+	prevSource := &datastructure.MaxFlowEdge{}
+	ek.graph.SetPrev(source, prevSource)
 
 	for queue.Len() > 0 {
 		u := queue.Remove(queue.Front()).(datastructure.Index)
@@ -33,26 +34,25 @@ func (ek *EdmondsKarp) bfsAugmentingPath(source, sink datastructure.Index) int {
 		}
 
 		ek.graph.ForEachVertexEdges(u, func(e *datastructure.MaxFlowEdge) {
-			if !ek.graph.IsVisited(e.GetTo()) && e.GetCapacity()-e.GetFlow() > 0 {
-				ek.graph.SetVisited(e.GetTo(), true)
-				prev[e.GetTo()] = e
+			if ek.graph.GetPrev(e.GetTo()) == nil && e.GetCapacity()-e.GetFlow() > 0 {
+				ek.graph.SetPrev(e.GetTo(), e)
 				queue.PushBack(e.GetTo())
 			}
 		})
 	}
 
-	if prev[sink] == nil {
+	if ek.graph.GetPrev(sink) == nil {
 		return 0
 	}
 
 	bottleneck := pkg.INF_WEIGHT
 
-	for e := prev[sink]; e != nil; e = prev[e.GetFrom()] {
+	for e := ek.graph.GetPrev(sink); e != prevSource; e = ek.graph.GetPrev(e.GetFrom()) {
 		residualCapacity := e.GetCapacity() - e.GetFlow()
 		bottleneck = util.MinInt(bottleneck, residualCapacity)
 	}
 
-	for e := prev[sink]; e != nil; e = prev[e.GetFrom()] {
+	for e := ek.graph.GetPrev(sink); e != prevSource; e = ek.graph.GetPrev(e.GetFrom()) {
 		e.AddFlow(bottleneck)
 		ek.graph.GetEdgeById(e.GetID() ^ 1).AddFlow(-bottleneck)
 	}
@@ -60,9 +60,6 @@ func (ek *EdmondsKarp) bfsAugmentingPath(source, sink datastructure.Index) int {
 	return bottleneck
 }
 
-func (ek *EdmondsKarp) resetGraph() {
-	ek.graph.ResetGraph()
-}
 func (ek *EdmondsKarp) computeMinCut(source, sink datastructure.Index, sources, sinks []datastructure.Index) *MinCut {
 
 	var (
@@ -70,14 +67,12 @@ func (ek *EdmondsKarp) computeMinCut(source, sink datastructure.Index, sources, 
 	)
 	maxFlow := 0
 	for {
-		ek.graph.HandleVisited(func(u datastructure.Index, visited bool) {
-			ek.graph.SetVisited(u, false)
-		})
+		ek.graph.ResetPrev()
 
 		flow := ek.bfsAugmentingPath(source, sink)
 		if flow == 0 {
 			if ek.debug && !ek.validateResultOne(minCut, source, sink, sources, sinks) {
-				fmt.Printf("Edmonds Karp: invalid min cut result")
+				fmt.Printf("invalid min cut result: violating capacity constraint, flow conservation, and max-flow min-cut theorem!!\n")
 			}
 			ek.makeMinCutFlags(minCut, maxFlow)
 			break
@@ -91,7 +86,7 @@ func (ek *EdmondsKarp) computeMinCut(source, sink datastructure.Index, sources, 
 
 func (ek *EdmondsKarp) makeMinCutFlags(minCut *MinCut, numberOfMinCutEdges int) {
 	for u := datastructure.Index(0); u < datastructure.Index(ek.graph.NumberOfVertices()-2); u++ { // exclude artificial source and sink
-		if ek.graph.IsVisited(u) {
+		if ek.graph.GetPrev(u) != nil {
 			minCut.SetFlag(u, true)
 		} else {
 			minCut.incrementNumNodesInPartitionTwo()
@@ -101,12 +96,15 @@ func (ek *EdmondsKarp) makeMinCutFlags(minCut *MinCut, numberOfMinCutEdges int) 
 }
 
 func (ek *EdmondsKarp) validateResultOne(minCut *MinCut,
-	source, target datastructure.Index, sources, sinks []datastructure.Index) bool {
+	source, sink datastructure.Index, sources, sinks []datastructure.Index) bool {
+	// see CLRS section 26.1 & 26.2
 	sourceSet := makeNodeSet(sources)
-	sinkNodesSet := makeNodeSet(sinks)
+	sinkSet := makeNodeSet(sinks)
 	incomingFlow := make([]int, ek.graph.NumberOfVertices())
 	outgoingFlow := make([]int, ek.graph.NumberOfVertices())
 	cutEdgesCount := 0
+	sourceOutgoingFlow := 0
+	sinkIncomingFlow := 0
 	for u := datastructure.Index(0); u < datastructure.Index(ek.graph.NumberOfVertices()-2); u++ {
 		for i := 0; i < ek.graph.GetVertexEdgesSize(u); i++ {
 			edge := ek.graph.GetEdgeOfVertex(u, i)
@@ -125,15 +123,32 @@ func (ek *EdmondsKarp) validateResultOne(minCut *MinCut,
 			if minCut.GetFlag(u) && !minCut.GetFlag(v) {
 				cutEdgesCount++
 			}
+
+			if v == sink {
+				sinkIncomingFlow += flow
+			}
 		}
 	}
 
+	for i := 0; i < ek.graph.GetVertexEdgesSize(source); i++ {
+		edge := ek.graph.GetEdgeOfVertex(source, i)
+		flow := edge.GetFlow()
+		sourceOutgoingFlow += flow
+	}
+
 	for u := datastructure.Index(0); u < datastructure.Index(ek.graph.NumberOfVertices()-2); u++ {
-		if !nodeInSet(u, sourceSet) && !nodeInSet(u, sinkNodesSet) && incomingFlow[u] != outgoingFlow[u] {
+		if !nodeInSet(u, sourceSet) && !nodeInSet(u, sinkSet) && incomingFlow[u] != outgoingFlow[u] {
+			// Flow conservation, sum over incoming flow of a vertex not in source or sink must equal to sum over outgoing flow
 			return false
 		}
 	}
 	if minCut.GetNumberOfMinCutEdges() != cutEdgesCount {
+		// max-flow min-cut theorem, the value of the maximum flow is equal to the capacity of the minimum cut
+		return false
+	}
+
+	if sourceOutgoingFlow != sinkIncomingFlow {
+		// outgoing flow from source must equal to incoming flow to sink
 		return false
 	}
 

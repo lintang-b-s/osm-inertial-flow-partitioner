@@ -230,9 +230,13 @@ func (dmf *DinicMaxFlow) isSeparated(borderSinkNodes []datastructure.Index) bool
 func (dmf *DinicMaxFlow) validateResult(minCut *MinCut,
 	sourceSet, sinkSet map[datastructure.Index]struct{}) bool {
 	// for every vertex that not in source and sink, check if incoming flow equal to outgoing flow
+	// see CLRS section 26.1 & 26.2
 	incomingFlow := make([]int, dmf.graph.NumberOfVertices())
 	outgoingFlow := make([]int, dmf.graph.NumberOfVertices())
 	cutEdgesCount := 0
+
+	sourceOutgoingFlow := 0
+	sinkIncomingFlow := 0
 	for u := datastructure.Index(0); u < datastructure.Index(dmf.graph.NumberOfVertices()); u++ {
 		for i := 0; i < dmf.graph.GetVertexEdgesSize(u); i++ {
 			edge := dmf.graph.GetEdgeOfVertex(u, i)
@@ -245,15 +249,24 @@ func (dmf *DinicMaxFlow) validateResult(minCut *MinCut,
 			}
 
 			if flow > edge.GetCapacity() {
+				// Capacity constraint for all edges, flow(u,v) <= c(u,v)
 				return false
 			}
 
 			if minCut.GetFlag(u) && !minCut.GetFlag(v) {
 				cutEdgesCount++
 			}
+
+			if nodeInSet(u, sourceSet) {
+				sourceOutgoingFlow += flow
+			}
+			if nodeInSet(v, sinkSet) {
+				sinkIncomingFlow += flow
+			}
 		}
 	}
 	for u := datastructure.Index(0); u < datastructure.Index(dmf.graph.NumberOfVertices()); u++ {
+		// Flow conservation, sum over incoming flow of a vertex not in source or sink must equal to sum over outgoing flow
 		inSourceSet := nodeInSet(u, sourceSet)
 		inSinkSet := nodeInSet(u, sinkSet)
 		if !inSourceSet && !inSinkSet && incomingFlow[u] != outgoingFlow[u] {
@@ -262,6 +275,12 @@ func (dmf *DinicMaxFlow) validateResult(minCut *MinCut,
 	}
 
 	if minCut.GetNumberOfMinCutEdges() != cutEdgesCount {
+		// max-flow min-cut theorem, the value of the maximum flow is equal to the capacity of the minimum cut
+		return false
+	}
+
+	if sourceOutgoingFlow != sinkIncomingFlow {
+		// outgoing flow from source must equal to incoming flow to sink
 		return false
 	}
 
@@ -382,7 +401,7 @@ func (dmf *DinicMaxFlow) MaxFlow(s datastructure.Index, t datastructure.Index) *
 			dmf.makeMinCutFlags(minCut, maxFlow)
 
 			if !dmf.validateResultOne(minCut, s, t) {
-				fmt.Printf("incorrect max flow result!!!, number of min-cut not the same as max flow, also flow conservation violated\n")
+				fmt.Printf("invalid min cut result: violating capacity constraint, flow conservation, and max-flow min-cut theorem!!\n")
 			}
 			return minCut
 		}

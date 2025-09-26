@@ -8,6 +8,7 @@ import (
 	"github.com/lintang-b-s/osm-inertial-flow-partitioner/pkg/datastructure"
 )
 
+// [see clrs section 26.1]   We add a supersource s and add a directed edge (s,si) with c(s,si)=inf for each i=1,2,3,..,m We also create a new supersink t and add a directed edge (ti,t) with capacity c(ti,t) = inf for each i=1,2,...,n
 func (ek *EdmondsKarp) createArtificialSourceSink(sourceNodes, sinkNodes []datastructure.Index) (datastructure.Index, datastructure.Index) {
 	artificialSource := datastructure.Index(ek.graph.NumberOfVertices())
 	artificialSink := datastructure.Index(ek.graph.NumberOfVertices() + 1)

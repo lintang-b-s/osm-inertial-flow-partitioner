@@ -86,6 +86,7 @@ type PartitionGraph struct {
 	level         []int
 	last          []int
 	visited       []bool
+	prev          []*MaxFlowEdge
 }
 
 func NewPartitionGraph(numberOfVertices int) *PartitionGraph {
@@ -100,6 +101,7 @@ func NewPartitionGraph(numberOfVertices int) *PartitionGraph {
 		level:         make([]int, numberOfVertices),
 		last:          make([]int, numberOfVertices),
 		visited:       make([]bool, numberOfVertices),
+		prev:          make([]*MaxFlowEdge, numberOfVertices+2),
 	}
 }
 
@@ -110,11 +112,17 @@ func (g *PartitionGraph) NumberOfVertices() int {
 	return len(g.vertices)
 }
 
-func (g *PartitionGraph) SetVisited(u Index, visited bool) {
-	g.visited[u] = visited
+func (g *PartitionGraph) GetPrev(u Index) *MaxFlowEdge {
+	return g.prev[u]
 }
-func (g *PartitionGraph) IsVisited(u Index) bool {
-	return g.visited[u]
+func (g *PartitionGraph) SetPrev(u Index, e *MaxFlowEdge) {
+	g.prev[u] = e
+}
+
+func (g *PartitionGraph) ResetPrev() {
+	for i := range g.prev {
+		g.prev[i] = nil
+	}
 }
 
 func (g *PartitionGraph) HandleVisited(handle func(u Index, visited bool)) {
@@ -210,7 +218,7 @@ func (g *PartitionGraph) AddEdge(u, v Index) {
 		return
 	}
 
-	// undirected graph
+	// undirected graph add reverseEdge with same capacity (https://www.inf.ufpr.br/pos/techreport/RT_DINF003_2004.pdf)
 	edge := NewMaxFlowEdge(len(g.edgeList), u, v, 1)
 	g.edgeList = append(g.edgeList, edge)
 	g.adjacencyList[u] = append(g.adjacencyList[u], len(g.edgeList)-1)

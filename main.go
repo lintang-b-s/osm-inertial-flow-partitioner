@@ -18,7 +18,7 @@ func main() {
 	graph := osmParser.Parse("./data/solo_jogja.osm.pbf", logger)
 
 	mlp := partitioner.NewMultilevelPartitioner(
-		[]int{int(math.Pow(2, 10)), int(math.Pow(2, 11)), int(math.Pow(2, 14)), int(math.Pow(2, 17)), int(math.Pow(2, 20))},
+		[]int{int(math.Pow(2, 8)), int(math.Pow(2, 11)), int(math.Pow(2, 14)), int(math.Pow(2, 17)), int(math.Pow(2, 20))},
 		5,
 		graph, logger,
 	)
